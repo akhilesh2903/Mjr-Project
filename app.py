@@ -261,66 +261,80 @@ def enhance_ultrasound_image(filepath, output_path):
         return filepath
 
 
-def send_whatsapp_notification(patient_phone, patient_name, report_id, diagnosis_label, pdf_patient_path, host_url):
+def upload_pdf_to_cloud(filepath):
     """
-    Send WhatsApp message to patient phone with diagnosis summary and PDF using Twilio.
-    Falls back gracefully if Twilio credentials are not configured.
+    Uploads a file to catbox.moe for temporary public hosting (free API, no auth).
+    Returns the public URL on success, or None on failure.
     """
     try:
-        from twilio.rest import Client
+        import requests
+        print(f"  [CLOUD] Uploading PDF to cloud storage...")
+        url = "https://catbox.moe/user/api.php"
+        data = {"reqtype": "fileupload"}
+        with open(filepath, 'rb') as f:
+            files = {"fileToUpload": f}
+            response = requests.post(url, data=data, files=files, timeout=30)
+        
+        if response.status_code == 200:
+            public_url = response.text.strip()
+            print(f"  [OK] PDF uploaded: {public_url}")
+            return public_url
+        else:
+            print(f"  [WARN] Cloud upload failed with status {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        print(f"  [WARN] Cloud upload exception: {e}")
+        return None
 
-        account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
-        auth_token  = os.environ.get('TWILIO_AUTH_TOKEN',  '')
 
-        # Sender number — registered Twilio WhatsApp sandbox number
-        twilio_phone = os.environ.get('TWILIO_PHONE_NUMBER', '+14155238886')
+import threading
 
-        if not all([account_sid, auth_token]):
-            print("  [INFO] Twilio credentials not configured — WhatsApp skipped")
-            return False
+def _send_pywhatkit_bg(phone, message_body):
+    try:
+        import pywhatkit
+        print(f"  [PYWHATKIT] Opening browser to send WhatsApp message to {phone}...")
+        # pywhatkit will open the browser, type the message, and send it.
+        pywhatkit.sendwhatmsg_instantly(phone, message_body, wait_time=15, tab_close=True, close_time=3)
+        print(f"  [OK] WhatsApp message sent successfully via browser automation!")
+    except ImportError:
+        print("  [WARN] pywhatkit not installed.")
+    except Exception as e:
+        print(f"  [WARN] PyWhatKit failed: {e}")
 
+def send_whatsapp_notification(patient_phone, patient_name, report_id, diagnosis_label, public_pdf_url):
+    """
+    Send WhatsApp message to patient phone with diagnosis summary and PDF using pywhatkit.
+    """
+    try:
         # Format recipient phone number (ensure E.164 format for India)
         phone = patient_phone.strip()
         if not phone.startswith('+'):
             phone = '+91' + phone  # Default to India (+91)
             
-        # Remove 'whatsapp:' prefix if user already included it, to avoid double prefixing
+        # Remove 'whatsapp:' prefix if user already included it
         if phone.startswith('whatsapp:'):
             phone = phone.replace('whatsapp:', '')
 
-        client = Client(account_sid, auth_token)
         message_body = (
             f"Dear {patient_name},\n\n"
             f"Your fetal ultrasound analysis report is ready.\n"
             f"Report ID : {report_id}\n"
             f"Diagnosis : {diagnosis_label}\n\n"
-            f"Please review your attached PDF report and consult your doctor for detailed interpretation.\n\n"
-            f"Sent from AI Fetal Ultrasound System"
         )
+        if public_pdf_url:
+            message_body += f"You can view and download your PDF report here:\n{public_pdf_url}\n\n"
         
-        # Prepare the public URL for the PDF
-        media_url = None
-        if pdf_patient_path:
-            media_url = f"{host_url.rstrip('/')}{pdf_patient_path}"
+        message_body += "Please consult your doctor for detailed interpretation.\nSent from AI Fetal Ultrasound System"
 
-        message_kwargs = {
-            "body": message_body,
-            "from_": f"whatsapp:{twilio_phone.replace('whatsapp:', '')}",
-            "to": f"whatsapp:{phone}"
-        }
+        # Start the background thread so the web UI isn't blocked for 15 seconds
+        t = threading.Thread(target=_send_pywhatkit_bg, args=(phone, message_body))
+        t.daemon = True
+        t.start()
         
-        if media_url:
-            message_kwargs["media_url"] = [media_url]
-
-        message = client.messages.create(**message_kwargs)
-        print(f"  [OK] WhatsApp sent from {twilio_phone} to {phone} — SID: {message.sid}")
         return True
 
-    except ImportError:
-        print("  [INFO] Twilio not installed — WhatsApp notification skipped")
-        return False
     except Exception as e:
-        print(f"  [WARN] WhatsApp failed: {e}")
+        print(f"  [WARN] WhatsApp scheduling failed: {e}")
         return False
 
 
@@ -574,14 +588,17 @@ def diagnose():
             traceback.print_exc()
 
         # ── WHATSAPP NOTIFICATION ─────────────────────────────────────────────
+        public_pdf_url = None
+        if patient_pdf_filepath and os.path.exists(patient_pdf_filepath):
+            public_pdf_url = upload_pdf_to_cloud(patient_pdf_filepath)
+
         print("  [SMS] Sending WhatsApp notification to patient...")
         sms_sent = send_whatsapp_notification(
             patient_phone=patient_phone,
             patient_name=patient_name,
             report_id=report.get('report_id', f"REPORT-{timestamp}"),
             diagnosis_label=cnn_prediction['class_label'],
-            pdf_patient_path=pdf_patient_path,
-            host_url=request.host_url
+            public_pdf_url=public_pdf_url
         )
 
         # ── BUILD RESPONSE ────────────────────────────────────────────────────

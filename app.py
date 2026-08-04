@@ -19,6 +19,11 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 from flask import Flask, render_template, request, jsonify, send_file
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 import json
 import traceback
 import tempfile
@@ -256,9 +261,9 @@ def enhance_ultrasound_image(filepath, output_path):
         return filepath
 
 
-def send_sms_notification(patient_phone, patient_name, report_id, diagnosis_label, pdf_patient_path):
+def send_whatsapp_notification(patient_phone, patient_name, report_id, diagnosis_label, pdf_patient_path, host_url):
     """
-    Send SMS to patient phone with diagnosis summary using Twilio.
+    Send WhatsApp message to patient phone with diagnosis summary and PDF using Twilio.
     Falls back gracefully if Twilio credentials are not configured.
     """
     try:
@@ -267,18 +272,21 @@ def send_sms_notification(patient_phone, patient_name, report_id, diagnosis_labe
         account_sid = os.environ.get('TWILIO_ACCOUNT_SID', '')
         auth_token  = os.environ.get('TWILIO_AUTH_TOKEN',  '')
 
-        # Sender number — registered Twilio number for this system
-        # Can be overridden via env var; defaults to the project sender number
-        twilio_phone = os.environ.get('TWILIO_PHONE_NUMBER', '+918618473440')
+        # Sender number — registered Twilio WhatsApp sandbox number
+        twilio_phone = os.environ.get('TWILIO_PHONE_NUMBER', '+14155238886')
 
         if not all([account_sid, auth_token]):
-            print("  [INFO] Twilio credentials not configured — SMS skipped")
+            print("  [INFO] Twilio credentials not configured — WhatsApp skipped")
             return False
 
         # Format recipient phone number (ensure E.164 format for India)
         phone = patient_phone.strip()
         if not phone.startswith('+'):
             phone = '+91' + phone  # Default to India (+91)
+            
+        # Remove 'whatsapp:' prefix if user already included it, to avoid double prefixing
+        if phone.startswith('whatsapp:'):
+            phone = phone.replace('whatsapp:', '')
 
         client = Client(account_sid, auth_token)
         message_body = (
@@ -286,25 +294,33 @@ def send_sms_notification(patient_phone, patient_name, report_id, diagnosis_labe
             f"Your fetal ultrasound analysis report is ready.\n"
             f"Report ID : {report_id}\n"
             f"Diagnosis : {diagnosis_label}\n\n"
-            f"Please collect your full PDF report from the clinic system "
-            f"and consult your doctor for detailed interpretation.\n\n"
-            f"Sent from AI Fetal Ultrasound System\n"
-            f"Sender: +91-8618473440"
+            f"Please review your attached PDF report and consult your doctor for detailed interpretation.\n\n"
+            f"Sent from AI Fetal Ultrasound System"
         )
+        
+        # Prepare the public URL for the PDF
+        media_url = None
+        if pdf_patient_path:
+            media_url = f"{host_url.rstrip('/')}{pdf_patient_path}"
 
-        message = client.messages.create(
-            body=message_body,
-            from_=twilio_phone,
-            to=phone
-        )
-        print(f"  [OK] SMS sent from {twilio_phone} to {phone} — SID: {message.sid}")
+        message_kwargs = {
+            "body": message_body,
+            "from_": f"whatsapp:{twilio_phone.replace('whatsapp:', '')}",
+            "to": f"whatsapp:{phone}"
+        }
+        
+        if media_url:
+            message_kwargs["media_url"] = [media_url]
+
+        message = client.messages.create(**message_kwargs)
+        print(f"  [OK] WhatsApp sent from {twilio_phone} to {phone} — SID: {message.sid}")
         return True
 
     except ImportError:
-        print("  [INFO] Twilio not installed — SMS notification skipped")
+        print("  [INFO] Twilio not installed — WhatsApp notification skipped")
         return False
     except Exception as e:
-        print(f"  [WARN] SMS failed: {e}")
+        print(f"  [WARN] WhatsApp failed: {e}")
         return False
 
 
@@ -557,14 +573,15 @@ def diagnose():
             print(f"  [WARN] PDF generation failed: {str(pdf_error)}")
             traceback.print_exc()
 
-        # ── SMS NOTIFICATION ──────────────────────────────────────────────────
-        print("  [SMS] Sending notification to patient...")
-        sms_sent = send_sms_notification(
+        # ── WHATSAPP NOTIFICATION ─────────────────────────────────────────────
+        print("  [SMS] Sending WhatsApp notification to patient...")
+        sms_sent = send_whatsapp_notification(
             patient_phone=patient_phone,
             patient_name=patient_name,
             report_id=report.get('report_id', f"REPORT-{timestamp}"),
             diagnosis_label=cnn_prediction['class_label'],
-            pdf_patient_path=pdf_patient_path
+            pdf_patient_path=pdf_patient_path,
+            host_url=request.host_url
         )
 
         # ── BUILD RESPONSE ────────────────────────────────────────────────────

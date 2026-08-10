@@ -37,8 +37,11 @@ from rag.retriever import MedicalKnowledgeRetriever
 from llm.report_generator import RadiologyReportGenerator
 from llm.pdf_report_generator import PDFReportGenerator
 
+from flask_cors import CORS
+
 # Initialize Flask app
-app = Flask(__name__)
+app = Flask(__name__, template_folder='../frontend/templates', static_folder='../frontend/static')
+CORS(app)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
 # ONLY allow medical imaging formats — NO GIF, NO arbitrary files
@@ -286,56 +289,6 @@ def upload_pdf_to_cloud(filepath):
         print(f"  [WARN] Cloud upload exception: {e}")
         return None
 
-
-import threading
-
-def _send_pywhatkit_bg(phone, message_body):
-    try:
-        import pywhatkit
-        print(f"  [PYWHATKIT] Opening browser to send WhatsApp message to {phone}...")
-        # pywhatkit will open the browser, type the message, and send it.
-        pywhatkit.sendwhatmsg_instantly(phone, message_body, wait_time=15, tab_close=True, close_time=3)
-        print(f"  [OK] WhatsApp message sent successfully via browser automation!")
-    except ImportError:
-        print("  [WARN] pywhatkit not installed.")
-    except Exception as e:
-        print(f"  [WARN] PyWhatKit failed: {e}")
-
-def send_whatsapp_notification(patient_phone, patient_name, report_id, diagnosis_label, public_pdf_url):
-    """
-    Send WhatsApp message to patient phone with diagnosis summary and PDF using pywhatkit.
-    """
-    try:
-        # Format recipient phone number (ensure E.164 format for India)
-        phone = patient_phone.strip()
-        if not phone.startswith('+'):
-            phone = '+91' + phone  # Default to India (+91)
-            
-        # Remove 'whatsapp:' prefix if user already included it
-        if phone.startswith('whatsapp:'):
-            phone = phone.replace('whatsapp:', '')
-
-        message_body = (
-            f"Dear {patient_name},\n\n"
-            f"Your fetal ultrasound analysis report is ready.\n"
-            f"Report ID : {report_id}\n"
-            f"Diagnosis : {diagnosis_label}\n\n"
-        )
-        if public_pdf_url:
-            message_body += f"You can view and download your PDF report here:\n{public_pdf_url}\n\n"
-        
-        message_body += "Please consult your doctor for detailed interpretation.\nSent from AI Fetal Ultrasound System"
-
-        # Start the background thread so the web UI isn't blocked for 15 seconds
-        t = threading.Thread(target=_send_pywhatkit_bg, args=(phone, message_body))
-        t.daemon = True
-        t.start()
-        
-        return True
-
-    except Exception as e:
-        print(f"  [WARN] WhatsApp scheduling failed: {e}")
-        return False
 
 
 @app.route('/')
@@ -587,20 +540,6 @@ def diagnose():
             print(f"  [WARN] PDF generation failed: {str(pdf_error)}")
             traceback.print_exc()
 
-        # ── WHATSAPP NOTIFICATION ─────────────────────────────────────────────
-        public_pdf_url = None
-        if patient_pdf_filepath and os.path.exists(patient_pdf_filepath):
-            public_pdf_url = upload_pdf_to_cloud(patient_pdf_filepath)
-
-        print("  [SMS] Sending WhatsApp notification to patient...")
-        sms_sent = send_whatsapp_notification(
-            patient_phone=patient_phone,
-            patient_name=patient_name,
-            report_id=report.get('report_id', f"REPORT-{timestamp}"),
-            diagnosis_label=cnn_prediction['class_label'],
-            public_pdf_url=public_pdf_url
-        )
-
         # ── BUILD RESPONSE ────────────────────────────────────────────────────
         response = {
             'status': 'success',
@@ -643,7 +582,7 @@ def diagnose():
                     'doctor_report': pdf_doctor_path,
                     'patient_report': pdf_patient_path
                 },
-                'sms_sent': sms_sent
+                'sms_sent': False
             },
             'metadata': {
                 'processing_timestamp': datetime.now().isoformat(),

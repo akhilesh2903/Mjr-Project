@@ -16,4 +16,5 @@ python-dotenv==1.0.0
 reportlab==4.0.9
 pypdf==4.0.1
 pydicom==2.4.3
-pywhatkit==8.12.0
+
+Flask-CORS==4.0.0

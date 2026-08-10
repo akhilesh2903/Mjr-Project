@@ -1130,7 +1130,7 @@
                   maxlength="15"
                   required
                 />
-                <span class="input-hint">Report summary will be sent to this number via SMS</span>
+                <span class="input-hint">Patient's contact number (for records only)</span>
               </div>
             </div>
 
@@ -1284,14 +1284,6 @@
               <span class="alert-icon">👤</span>
               <span id="patientInfoText"></span>
             </div>
-
-            <!-- SMS Status -->
-            <div class="sms-indicator hidden" id="smsIndicator">
-              <i class="fas fa-sms"></i>
-              <span id="smsText"></span>
-            </div>
-
-            <!-- Diagnosis cards -->
             <div class="diagnosis-grid">
               <div class="diag-card">
                 <div class="diag-label">Primary Diagnosis</div>
@@ -1792,7 +1784,7 @@
         const stepTimer = setTimeout(() => setProgress(2), 1500);
         const stepTimer2 = setTimeout(() => setProgress(3), 3000);
 
-        const res = await fetch('/api/diagnose', {
+        const res = await fetch('http://127.0.0.1:5000/api/diagnose', {
           method: 'POST',
           body: formData
         });
@@ -1844,18 +1836,6 @@
       document.getElementById('patientInfoText').innerHTML =
         `Patient: <strong>${d.patient_name}</strong> | Phone: <strong>${d.patient_phone}</strong> | Report ID: <strong>${d.report.report_id}</strong>`;
 
-      // SMS status
-      const smsEl = document.getElementById('smsIndicator');
-      const smsTxt = document.getElementById('smsText');
-      smsEl.classList.remove('hidden');
-      if (d.sms_sent) {
-        smsEl.classList.remove('failed');
-        smsTxt.textContent = `✅ Report summary sent via SMS to ${d.patient_phone}`;
-      } else {
-        smsEl.classList.add('failed');
-        smsTxt.textContent = `ℹ️ SMS notification not sent (Twilio not configured) — Patient can download their report below.`;
-      }
-
       // Diagnosis label & confidence
       document.getElementById('diagLabel').textContent = pred.primary_diagnosis;
       document.getElementById('confBar').style.width = pred.confidence_percentage + '%';
@@ -1905,8 +1885,8 @@
       const enhancedPath = d.visualizations.enhanced_image_path;
       const resultEnhSection = document.getElementById('enhancedImageSection');
       if (enhancedPath) {
-        document.getElementById('resultOriginalImg').src = d.image_path;
-        document.getElementById('resultEnhancedImg').src = enhancedPath;
+        document.getElementById('resultOriginalImg').src = 'http://127.0.0.1:5000/' + d.image_path;
+        document.getElementById('resultEnhancedImg').src = 'http://127.0.0.1:5000/' + enhancedPath;
         resultEnhSection.classList.remove('hidden');
       } else {
         resultEnhSection.classList.add('hidden');
@@ -1915,8 +1895,8 @@
       // Grad-CAM Visualizations
       if (d.visualizations.available) {
         document.getElementById('vizSection').classList.remove('hidden');
-        document.getElementById('vizOriginal').src = d.image_path;
-        document.getElementById('vizGradcam').src = d.visualizations.gradcam_path;
+        document.getElementById('vizOriginal').src = 'http://127.0.0.1:5000/' + d.image_path;
+        document.getElementById('vizGradcam').src = 'http://127.0.0.1:5000/' + d.visualizations.gradcam_path;
       }
 
       // PDF buttons
@@ -2007,8 +1987,8 @@
     function downloadPDF(type) {
       if (!diagnosisResult) return;
       const path = type === 'doctor'
-        ? diagnosisResult.diagnosis.pdf_reports.doctor_report
-        : diagnosisResult.diagnosis.pdf_reports.patient_report;
+        ? 'http://127.0.0.1:5000/' + diagnosisResult.diagnosis.pdf_reports.doctor_report
+        : 'http://127.0.0.1:5000/' + diagnosisResult.diagnosis.pdf_reports.patient_report;
 
       if (!path) {
         alert(`${type === 'doctor' ? 'Medical' : 'Patient'} report is not available yet.`);

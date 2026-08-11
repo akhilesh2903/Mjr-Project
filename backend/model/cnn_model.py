@@ -67,13 +67,13 @@ class FetalUltrasoundCNN:
     def _load_pretrained_model(self):
         """Load pretrained model and modify final layer for 3-class classification."""
         if self.model_name == 'resnet50':
-            model = models.resnet50(pretrained=True)
+            model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
             # Replace the final fully connected layer
             in_features = model.fc.in_features
             model.fc = nn.Linear(in_features, self.num_classes)
         
         elif self.model_name == 'mobilenet_v2':
-            model = models.mobilenet_v2(pretrained=True)
+            model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
             in_features = model.classifier[1].in_features
             model.classifier[1] = nn.Linear(in_features, self.num_classes)
         

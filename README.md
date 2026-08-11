@@ -1,4 +1,4 @@
-# 🏥 AI-Enhanced Fetal Ultrasound Diagnosis System
+# Deep Learning-Based Ultrasound Image Analysis for Early Detection of Fetal Growth Abnormalities
 
 ## Overview
 
